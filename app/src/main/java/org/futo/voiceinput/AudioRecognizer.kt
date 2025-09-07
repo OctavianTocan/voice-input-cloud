@@ -28,7 +28,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import org.futo.voiceinput.ggml.DecodingMode
 import org.futo.voiceinput.ml.RunState
-import org.futo.voiceinput.ml.WhisperModelWrapper
 import org.futo.voiceinput.settings.BEAM_SEARCH
 import org.futo.voiceinput.settings.DISALLOW_SYMBOLS
 import org.futo.voiceinput.settings.ENABLE_30S_LIMIT
@@ -38,8 +37,12 @@ import org.futo.voiceinput.settings.IS_VAD_ENABLED
 import org.futo.voiceinput.settings.LANGUAGE_TOGGLES
 import org.futo.voiceinput.settings.MULTILINGUAL_MODEL_INDEX
 import org.futo.voiceinput.settings.PERSONAL_DICTIONARY
+import org.futo.voiceinput.settings.USE_CLOUD_STT
+import org.futo.voiceinput.settings.CLOUD_STT_ENDPOINT
+import org.futo.voiceinput.settings.CLOUD_STT_API_KEY
 import org.futo.voiceinput.settings.USE_LANGUAGE_SPECIFIC_MODELS
 import org.futo.voiceinput.settings.getSetting
+import org.futo.voiceinput.cloud.CloudSTTEngine
 import java.io.IOException
 import java.nio.FloatBuffer
 import java.nio.ShortBuffer
@@ -63,7 +66,7 @@ abstract class AudioRecognizer {
         return isRecording
     }
 
-    private var model: WhisperModelWrapper? = null
+    private var recognizerEngine: SpeechRecognizerEngine? = null
 
     private var floatSamples: FloatBuffer = FloatBuffer.allocate(16000 * 30)
     private var recorderJob: Job? = null
@@ -137,8 +140,8 @@ abstract class AudioRecognizer {
 
         lifecycleScope.launch {
             modelJob?.join()
-            model?.close()
-            model = null
+            recognizerEngine?.close()
+            recognizerEngine = null
         }
     }
 
@@ -185,71 +188,85 @@ abstract class AudioRecognizer {
         }
     }
 
-    private suspend fun tryLoadModelOrCancel(primaryModel: ModelData, secondaryModelP: ModelData?) {
-        val secondaryModel = if(context.getSetting(USE_LANGUAGE_SPECIFIC_MODELS)) { secondaryModelP } else { null }
+    private suspend fun tryLoadEngineOrCancel() {
         try {
-            model = WhisperModelWrapper(
-                context,
-                primaryModel,
-                secondaryModel,
-                context.getSetting(DISALLOW_SYMBOLS),
-                context.getSetting(LANGUAGE_TOGGLES),
-                onStatusUpdate = {
-                    decodingStatus(it)
-                },
-                onPartialDecode = {
-                    lifecycleScope.launch {
-                        withContext(Dispatchers.Main) {
-                            partialResult(it)
-                        }
+            // Check if cloud STT is enabled
+            if (context.getSetting(USE_CLOUD_STT.key, USE_CLOUD_STT.default)) {
+                val endpoint = context.getSetting(CLOUD_STT_ENDPOINT.key, CLOUD_STT_ENDPOINT.default)
+                val apiKey = context.getSetting(CLOUD_STT_API_KEY.key, CLOUD_STT_API_KEY.default)
+                
+                if (endpoint.isNotBlank() && apiKey.isNotBlank()) {
+                    recognizerEngine = CloudSTTEngine(
+                        context = context,
+                        apiEndpoint = endpoint,
+                        apiKey = apiKey,
+                        streamingEnabled = true
+                    )
+                } else {
+                    throw IOException("Cloud STT enabled but endpoint or API key not configured")
+                }
+            } else {
+                // Use local Whisper model
+                val englishModelIdx = context.getSetting(ENGLISH_MODEL_INDEX)
+                val multilingualModelIdx = context.getSetting(MULTILINGUAL_MODEL_INDEX)
+                val isMultilingual = context.getSetting(ENABLE_MULTILINGUAL)
+                
+                val primaryModel = if (forcedLanguage == "en" || !isMultilingual) {
+                    ENGLISH_MODELS[englishModelIdx]
+                } else {
+                    MULTILINGUAL_MODELS[multilingualModelIdx]
+                }
+                
+                val fallbackModel = if (isMultilingual && context.getSetting(LANGUAGE_TOGGLES).contains("en")) {
+                    ENGLISH_MODELS[englishModelIdx]
+                } else {
+                    null
+                }
+                
+                recognizerEngine = LocalWhisperEngine(
+                    context = context,
+                    primaryModel = primaryModel,
+                    fallbackModel = fallbackModel
+                )
+            }
+            
+            // Set up callbacks
+            recognizerEngine?.setStatusCallback { status ->
+                decodingStatus(status)
+            }
+            
+            recognizerEngine?.setPartialResultCallback { partial ->
+                lifecycleScope.launch {
+                    withContext(Dispatchers.Main) {
+                        partialResult(partial)
                     }
                 }
-            )
+            }
         } catch (e: IOException) {
-            context.startModelDownloadActivity(
-                listOf(primaryModel).let {
-                    if (secondaryModel != null) it + secondaryModel
-                    else it
+            // For local models, still offer download activity
+            if (!context.getSetting(USE_CLOUD_STT.key, USE_CLOUD_STT.default)) {
+                val englishModelIdx = context.getSetting(ENGLISH_MODEL_INDEX)
+                val multilingualModelIdx = context.getSetting(MULTILINGUAL_MODEL_INDEX)
+                val modelsToCheck = mutableListOf<ModelData>()
+                
+                if (forcedLanguage == "en" || !context.getSetting(ENABLE_MULTILINGUAL)) {
+                    modelsToCheck.add(ENGLISH_MODELS[englishModelIdx])
+                } else {
+                    modelsToCheck.add(MULTILINGUAL_MODELS[multilingualModelIdx])
+                    if (context.getSetting(LANGUAGE_TOGGLES).contains("en")) {
+                        modelsToCheck.add(ENGLISH_MODELS[englishModelIdx])
+                    }
                 }
-            )
+                
+                context.startModelDownloadActivity(modelsToCheck)
+            }
             cancelRecognizer()
         }
     }
 
     private suspend fun loadModelInner() {
         try {
-            val englishModelIdx = context.getSetting(ENGLISH_MODEL_INDEX)
-            val multilingualModelIdx = context.getSetting(MULTILINGUAL_MODEL_INDEX)
-            val languages = context.getSetting(LANGUAGE_TOGGLES)
-            val isMultilingual = context.getSetting(ENABLE_MULTILINGUAL)
-
-            if (forcedLanguage != null) {
-                tryLoadModelOrCancel(
-                    if (forcedLanguage == "en") {
-                        ENGLISH_MODELS[englishModelIdx]
-                    } else {
-                        MULTILINGUAL_MODELS[multilingualModelIdx]
-                    },
-
-                    null
-                )
-            } else {
-                if (isMultilingual) {
-                    tryLoadModelOrCancel(
-                        MULTILINGUAL_MODELS[multilingualModelIdx],
-                        if (languages.contains("en")) {
-                            ENGLISH_MODELS[englishModelIdx]
-                        } else {
-                            null
-                        }
-                    )
-                } else {
-                    tryLoadModelOrCancel(
-                        ENGLISH_MODELS[englishModelIdx],
-                        null
-                    )
-                }
-            }
+            tryLoadEngineOrCancel()
         } catch(e: OutOfMemoryError) {
             decodingStatus(RunState.OOMError)
 
@@ -264,7 +281,7 @@ abstract class AudioRecognizer {
     }
 
     private fun loadModel() {
-        if (model == null) {
+        if (recognizerEngine == null) {
             loadModelJob = lifecycleScope.launch {
                 withContext(Dispatchers.Default) {
                     loadModelInner()
@@ -502,26 +519,26 @@ abstract class AudioRecognizer {
 
     private suspend fun runModel(){
         if(loadModelJob != null && loadModelJob!!.isActive) {
-            println("Model was not finished loading...")
+            println("Engine was not finished loading...")
             loadModelJob!!.join()
-        }else if(model == null) {
-            println("Model was null by the time runModel was called...")
+        }else if(recognizerEngine == null) {
+            println("Engine was null by the time runModel was called...")
             loadModel()
             loadModelJob!!.join()
         }
 
         val floatArray = floatSamples.array().sliceArray(0 until floatSamples.position())
 
-        val words = context.getSetting(PERSONAL_DICTIONARY)
+        val glossary = context.getSetting(PERSONAL_DICTIONARY)
         val decodingMode = if(context.getSetting(BEAM_SEARCH)){ DecodingMode.BeamSearch5 } else { DecodingMode.Greedy }
 
         yield()
         val text = try {
-            model!!.run(floatArray, words, forcedLanguage, decodingMode)
+            recognizerEngine!!.transcribe(floatArray, glossary, forcedLanguage, decodingMode)
         } catch(e: OutOfMemoryError) {
             decodingStatus(RunState.OOMError)
-            model!!.close()
-            model = null
+            recognizerEngine!!.close()
+            recognizerEngine = null
             loadModelJob = null
 
             for(i in 0 until 2) {
@@ -535,8 +552,8 @@ abstract class AudioRecognizer {
             return runModel()
         }
 
-        model!!.close()
-        model = null
+        recognizerEngine!!.close()
+        recognizerEngine = null
 
         lifecycleScope.launch {
             withContext(Dispatchers.Main) {

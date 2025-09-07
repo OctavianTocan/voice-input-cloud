@@ -15,12 +15,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import org.futo.voiceinput.R
 import org.futo.voiceinput.settings.*
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CloudSTTScreen(viewModel: SettingsViewModel = viewModel()) {
-    val useCloudSTT by viewModel.useDataStore(USE_CLOUD_STT)
-    val endpoint by viewModel.useDataStore(CLOUD_STT_ENDPOINT)
-    val apiKey by viewModel.useDataStore(CLOUD_STT_API_KEY)
-    val provider by viewModel.useDataStore(CLOUD_STT_PROVIDER)
+    val (useCloudSTT, setUseCloudSTT) = useDataStore(USE_CLOUD_STT.key, USE_CLOUD_STT.default)
+    val (endpoint, setEndpoint) = useDataStore(CLOUD_STT_ENDPOINT.key, CLOUD_STT_ENDPOINT.default)
+    val (apiKey, setApiKey) = useDataStore(CLOUD_STT_API_KEY.key, CLOUD_STT_API_KEY.default)
+    val (provider, setProvider) = useDataStore(CLOUD_STT_PROVIDER.key, CLOUD_STT_PROVIDER.default)
     
     var showApiKey by remember { mutableStateOf(false) }
     
@@ -40,12 +41,12 @@ fun CloudSTTScreen(viewModel: SettingsViewModel = viewModel()) {
                 style = MaterialTheme.typography.bodyLarge
             )
             Switch(
-                checked = useCloudSTT.value,
-                onCheckedChange = { viewModel.setValue(USE_CLOUD_STT, it) }
+                checked = useCloudSTT,
+                onCheckedChange = { setUseCloudSTT(it) }
             )
         }
         
-        if (useCloudSTT.value) {
+        if (useCloudSTT) {
             Divider(modifier = Modifier.padding(vertical = 8.dp))
             
             // Provider selection
@@ -73,25 +74,21 @@ fun CloudSTTScreen(viewModel: SettingsViewModel = viewModel()) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(
-                            selected = provider.value == value,
+                            selected = provider == value,
                             onClick = { 
-                                viewModel.setValue(CLOUD_STT_PROVIDER, value)
+                                setProvider(value)
                                 // Set default endpoint based on provider
                                 when(value) {
-                                    "openai" -> viewModel.setValue(
-                                        CLOUD_STT_ENDPOINT, 
+                                    "openai" -> setEndpoint(
                                         "https://api.openai.com/v1/audio/transcriptions"
                                     )
-                                    "google" -> viewModel.setValue(
-                                        CLOUD_STT_ENDPOINT,
+                                    "google" -> setEndpoint(
                                         "https://speech.googleapis.com/v1/speech:recognize"
                                     )
-                                    "azure" -> viewModel.setValue(
-                                        CLOUD_STT_ENDPOINT,
+                                    "azure" -> setEndpoint(
                                         "https://YOUR-REGION.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1"
                                     )
-                                    "aws" -> viewModel.setValue(
-                                        CLOUD_STT_ENDPOINT,
+                                    "aws" -> setEndpoint(
                                         "wss://transcribe-streaming.YOUR-REGION.amazonaws.com/stream-transcription-websocket"
                                     )
                                 }
@@ -109,8 +106,8 @@ fun CloudSTTScreen(viewModel: SettingsViewModel = viewModel()) {
             
             // Endpoint configuration
             OutlinedTextField(
-                value = endpoint.value,
-                onValueChange = { viewModel.setValue(CLOUD_STT_ENDPOINT, it) },
+                value = endpoint,
+                onValueChange = { setEndpoint(it) },
                 label = { Text("API Endpoint") },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -121,8 +118,8 @@ fun CloudSTTScreen(viewModel: SettingsViewModel = viewModel()) {
             
             // API Key configuration
             OutlinedTextField(
-                value = apiKey.value,
-                onValueChange = { viewModel.setValue(CLOUD_STT_API_KEY, it) },
+                value = apiKey,
+                onValueChange = { setApiKey(it) },
                 label = { Text("API Key") },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -170,7 +167,7 @@ fun CloudSTTScreen(viewModel: SettingsViewModel = viewModel()) {
             }
             
             // Test connection button
-            if (endpoint.value.isNotBlank() && apiKey.value.isNotBlank()) {
+            if (endpoint.isNotBlank() && apiKey.isNotBlank()) {
                 Button(
                     onClick = { 
                         // TODO: Implement connection test

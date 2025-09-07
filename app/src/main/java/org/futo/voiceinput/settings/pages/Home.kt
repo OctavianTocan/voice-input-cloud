@@ -140,6 +140,14 @@ fun HomeScreen(
             navigate = { navController.navigate("input") },
             icon = painterResource(R.drawable.shift)
         )
+        
+        NavigationItem(
+            title = "Cloud STT",
+            subtitle = "Configure cloud speech recognition",
+            style = NavigationItemStyle.Misc,
+            navigate = { navController.navigate("cloudSTT") },
+            icon = painterResource(R.drawable.globe)
+        )
 
         SettingsSeparator(stringResource(R.string.miscellaneous))
         NavigationItem(

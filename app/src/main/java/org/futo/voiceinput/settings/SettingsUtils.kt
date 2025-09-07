@@ -50,6 +50,7 @@ import org.futo.voiceinput.settings.pages.PaymentScreen
 import org.futo.voiceinput.settings.pages.PaymentThankYouScreen
 import org.futo.voiceinput.settings.pages.TestScreen
 import org.futo.voiceinput.settings.pages.ThemeScreen
+import org.futo.voiceinput.settings.pages.CloudSTTScreen
 
 
 data class SettingsUiState(
@@ -148,6 +149,7 @@ fun SettingsMain(
         composable("models") { ModelsScreen(settingsViewModel, navController) }
         composable("input") { InputScreen(settingsViewModel, navController) }
         composable("themes") { ThemeScreen(navController) }
+        composable("cloudSTT") { CloudSTTScreen(settingsViewModel) }
 
         composable("credits") {
             CreditsScreen(openDependencies = {

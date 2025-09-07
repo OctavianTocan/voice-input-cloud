@@ -8,25 +8,25 @@ import androidx.datastore.preferences.core.stringPreferencesKey
  */
 
 // Toggle between local Whisper and cloud STT
-val USE_CLOUD_STT = SettingDefinition(
+val USE_CLOUD_STT = SettingsKey(
     key = booleanPreferencesKey("use_cloud_stt"),
     default = false
 )
 
 // Cloud STT endpoint URL
-val CLOUD_STT_ENDPOINT = SettingDefinition(
+val CLOUD_STT_ENDPOINT = SettingsKey(
     key = stringPreferencesKey("cloud_stt_endpoint"),
     default = ""  // e.g., "https://api.openai.com/v1/audio/transcriptions"
 )
 
 // Cloud STT API key  
-val CLOUD_STT_API_KEY = SettingDefinition(
+val CLOUD_STT_API_KEY = SettingsKey(
     key = stringPreferencesKey("cloud_stt_api_key"),
     default = ""
 )
 
 // Cloud STT provider for UI display
-val CLOUD_STT_PROVIDER = SettingDefinition(
+val CLOUD_STT_PROVIDER = SettingsKey(
     key = stringPreferencesKey("cloud_stt_provider"),
     default = "custom"  // Options: "openai", "google", "azure", "aws", "custom"
 )
